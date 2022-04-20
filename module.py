@@ -35,7 +35,8 @@ def quantize_tensor(x, scale, zero_point, num_bits=8, signed=False):
         qmax = 2. ** num_bits - 1.
  
     q_x = zero_point + x / scale
-    q_x.clamp_(qmin, qmax).round_()
+    if not signed:
+        q_x.clamp_(qmin, qmax).round_()
     
     return q_x
  
@@ -214,6 +215,10 @@ class QLinear(QModule):
         self.fc_module.weight.data = self.fc_module.weight.data - self.qw.zero_point
         self.fc_module.bias.data = quantize_tensor(self.fc_module.bias.data, scale=self.qi.scale * self.qw.scale,
                                                    zero_point=0, num_bits=32, signed=True)
+        for i in range(self.fc_module.bias.data.size()[0]):
+            sum_ = -self.qi.zero_point * torch.sum(self.fc_module.weight.data[i])
+            self.fc_module.bias.data[i] = self.fc_module.bias.data[i] + sum_
+        self.fc_module.bias.data.clamp_(-2**(32 - 1), 2**(32 - 1)).round_()
 
     def forward(self, x):
         if hasattr(self, 'qi'):
@@ -231,7 +236,7 @@ class QLinear(QModule):
         return x
 
     def quantize_inference(self, x):
-        x = x - self.qi.zero_point
+        #x = x - self.qi.zero_point
         x = self.fc_module(x)
         x = self.M * x
         x.round_() 
@@ -399,9 +404,13 @@ class QConvBNReLU(QModule):
 
         self.conv_module.bias.data = quantize_tensor(bias, scale=self.qi.scale * self.qw.scale,
                                                      zero_point=0, num_bits=32, signed=True)
+        for i in range(self.conv_module.bias.data.size()[0]):
+            sum_ = -self.qi.zero_point * torch.sum(self.conv_module.weight.data[i])
+            self.conv_module.bias.data[i] = self.conv_module.bias.data[i] + sum_
+        self.conv_module.bias.data.clamp_(-2**(32 - 1), 2**(32 - 1)).round_()
 
     def quantize_inference(self, x):
-        x = x - self.qi.zero_point
+        #x = x - self.qi.zero_point
         x = self.conv_module(x)
         x = self.M * x
         x.round_() 
